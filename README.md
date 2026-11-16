@@ -1,2 +1,2 @@
 # RAGu
-All purpose RAG server implementatio
+All purpose RAG server implementation, exposed through credential secured REST API.
