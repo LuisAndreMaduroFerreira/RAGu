@@ -1,0 +1,15 @@
+-- Fresh installation only. Run interactively as a PostgreSQL administrator.
+-- Do not run against the existing RAGU database or recreate existing roles.
+\set ON_ERROR_STOP on
+CREATE ROLE ragu_migrator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+CREATE ROLE ragu_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+\password ragu_migrator
+\password ragu_app
+CREATE DATABASE ragu OWNER ragu_migrator;
+REVOKE ALL ON DATABASE ragu FROM PUBLIC;
+GRANT CONNECT ON DATABASE ragu TO ragu_migrator, ragu_app;
+\connect ragu
+ALTER SCHEMA public OWNER TO ragu_migrator;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO ragu_app;
+-- Next: use "uv run --locked ragu migrate" as documented.

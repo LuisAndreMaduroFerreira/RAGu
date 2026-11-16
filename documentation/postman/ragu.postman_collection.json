@@ -1,0 +1,254 @@
+{
+  "info": {
+    "name": "RAGU - isolated embedding demo",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Use Postman Desktop locally with synchronization disabled for private data. See documentation\\api-testing.md. Prepare synthetic files first, set demo_folder to the printed absolute server-local path, and create the local Vault secret ragu-password. Allow scripts to access Vault. Run only the End-to-end folder, in order, with a 2000 ms request delay. Login stores the short-lived JWT in local Vault as ragu-access-token; neither secret is a collection variable. Creates a NEW project/corpus, never replaces the default corpus. Keep demo files while retrieving. Cloud remains unwired. Vault scripts require Postman Desktop, not Newman or a cloud runner."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{"key": "token", "value": "{{vault:ragu-access-token}}", "type": "string"}]
+  },
+  "protocolProfileBehavior": {"followRedirects": false},
+  "variable": [
+    {"key": "base_url", "value": "http://127.0.0.1:8000", "type": "string"},
+    {"key": "username", "value": "admin", "type": "string"},
+    {"key": "demo_folder", "value": "", "type": "string"},
+    {"key": "index_mode", "value": "dense", "type": "string"},
+    {"key": "candidate_method", "value": "dense", "type": "string"},
+    {"key": "query", "value": "How should a client recover from temporary network failures?", "type": "string"},
+    {"key": "project_id", "value": "", "type": "string"},
+    {"key": "corpus_id", "value": "", "type": "string"},
+    {"key": "job_id", "value": "", "type": "string"},
+    {"key": "generation_id", "value": "", "type": "string"},
+    {"key": "candidate_ids", "value": "[]", "type": "string"},
+    {"key": "page_id", "value": "", "type": "string"}
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {"type": "text/javascript", "exec": [
+        "const base = pm.variables.get('base_url');",
+        "if (!/^https:\\/\\/[^\\s/@?#:]+(?::[0-9]+)?$/.test(base) && !/^http:\\/\\/(?:localhost|127\\.0\\.0\\.1)(?::[0-9]+)?$/.test(base)) {",
+        "  pm.execution.setNextRequest(null);",
+        "  throw new Error('Use an HTTPS origin, or HTTP on localhost/127.0.0.1 only.');",
+        "}"
+      ]}
+    },
+    {
+      "listen": "test",
+      "script": {"type": "text/javascript", "exec": [
+        "pm.test('Successful HTTP response', () => pm.expect(pm.response.code).to.be.within(200, 299));",
+        "if (pm.response.code < 200 || pm.response.code >= 300) {",
+        "  pm.execution.setNextRequest(null);",
+        "  throw new Error('Request failed; inspect the response and server prerequisites.');",
+        "}"
+      ]}
+    }
+  ],
+  "item": [
+    {
+      "name": "End-to-end",
+      "description": "Run this folder with a 2000 ms delay. Requires existing admin, approved local demo_folder, API, separate worker, PostgreSQL, Qdrant and a provisioned dense model. Hybrid additionally needs BM25. No Redis or live Confluence.",
+      "item": [
+        {
+          "name": "01 - Liveness",
+          "request": {"method": "GET", "auth": {"type": "noauth"}, "url": "{{base_url}}/actuator/health/liveness"}
+        },
+        {
+          "name": "02 - Login",
+          "event": [
+            {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+              "const password = await pm.vault.get('ragu-password');",
+              "if (!password) { throw new Error('Set the local Vault secret ragu-password first.'); }",
+              "pm.variables.set('login_body', JSON.stringify({username: pm.variables.get('username'), password}));"
+            ]}},
+            {"listen": "test", "script": {"type": "text/javascript", "exec": [
+              "if (pm.response.code === 200) {",
+              "  const data = pm.response.json();",
+              "  await pm.vault.set('ragu-access-token', data.access_token);",
+              "  pm.test('Bearer token issued', () => pm.expect(data.token_type).to.equal('bearer'));",
+              "}"
+            ]}}
+          ],
+          "request": {
+            "method": "POST", "auth": {"type": "noauth"},
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{{login_body}}", "options": {"raw": {"language": "json"}}},
+            "url": "{{base_url}}/auth/login"
+          }
+        },
+        {
+          "name": "03 - Readiness",
+          "request": {"method": "GET", "url": "{{base_url}}/actuator/health/readiness"},
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "pm.test('Database and Qdrant ready', () => pm.expect(pm.response.json().status).to.equal('UP'));"
+          ]}}]
+        },
+        {
+          "name": "04 - Current administrator",
+          "request": {"method": "GET", "url": "{{base_url}}/auth/me"},
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "if (pm.response.code === 200 && pm.response.json().role !== 'admin') {",
+            "  pm.execution.setNextRequest(null);",
+            "  throw new Error('An existing admin is required to create the isolated demo.');",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "05 - Create isolated project",
+          "request": {
+            "method": "POST", "url": "{{base_url}}/projects",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"name\":\"Postman embedding demo {{$timestamp}}\"}", "options": {"raw": {"language": "json"}}}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "if (pm.response.code === 201) { pm.collectionVariables.set('project_id', pm.response.json().id); }"
+          ]}}]
+        },
+        {
+          "name": "06 - Create approved-folder corpus",
+          "event": [
+            {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+              "const folder = pm.variables.get('demo_folder');",
+              "if (!folder) { throw new Error('Set demo_folder to the absolute path printed by --prepare-only.'); }",
+              "pm.variables.set('corpus_body', JSON.stringify({name: 'Embedding demo', source: 'local_consumption', folder}));"
+            ]}},
+            {"listen": "test", "script": {"type": "text/javascript", "exec": [
+              "if (pm.response.code === 201) { pm.collectionVariables.set('corpus_id', pm.response.json().id); }"
+            ]}}
+          ],
+          "request": {
+            "method": "POST", "url": "{{base_url}}/projects/{{project_id}}/corpora",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{{corpus_body}}", "options": {"raw": {"language": "json"}}}
+          }
+        },
+        {
+          "name": "07 - Queue embeddings",
+          "request": {
+            "method": "POST", "url": "{{base_url}}/ingestions",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\"corpus_id\":\"{{corpus_id}}\",\"index_mode\":\"{{index_mode}}\"}", "options": {"raw": {"language": "json"}}}
+          },
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "if (pm.response.code === 202) {",
+            "  pm.collectionVariables.set('job_id', pm.response.json().id);",
+            "  pm.collectionVariables.set('poll_deadline', String(Date.now() + 600000));",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "08 - Wait for worker",
+          "request": {"method": "GET", "url": "{{base_url}}/ingestions/{{job_id}}"},
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "if (pm.response.code === 200) {",
+            "  const job = pm.response.json();",
+            "  if (job.status === 'pending' || job.status === 'running') {",
+            "    if (Date.now() >= Number(pm.collectionVariables.get('poll_deadline'))) {",
+            "      pm.execution.setNextRequest(null);",
+            "      throw new Error('Worker timeout. Verify the separate worker; the job was not cancelled.');",
+            "    }",
+            "    pm.execution.setNextRequest(pm.info.requestName);",
+            "  } else if (job.status !== 'succeeded') {",
+            "    pm.execution.setNextRequest(null);",
+            "    throw new Error('Ingestion failed. Inspect the job response and private worker logs.');",
+            "  } else {",
+            "    pm.collectionVariables.set('generation_id', job.id);",
+            "    pm.test('Both documents embedded', () => pm.expect(job.page_count).to.equal(2));",
+            "    pm.test('At least two chunks published', () => pm.expect(job.chunk_count).to.be.at.least(2));",
+            "  }",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "09 - Published index profile",
+          "request": {"method": "GET", "url": "{{base_url}}/documents/capabilities?corpus_id={{corpus_id}}"},
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "if (pm.response.code === 200) {",
+            "  const data = pm.response.json();",
+            "  pm.test('Published generation matches job', () => pm.expect(data.generation_id).to.equal(pm.variables.get('generation_id')));",
+            "  pm.test('Dense representation available', () => pm.expect(data.candidate_methods).to.include('dense'));",
+            "}"
+          ]}}]
+        },
+        {
+          "name": "10 - Retrieve candidates",
+          "event": [
+            {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+              "pm.variables.set('search_body', JSON.stringify({corpus_id: pm.variables.get('corpus_id'), query: pm.variables.get('query'), candidate_method: pm.variables.get('candidate_method'), limit: 2}));"
+            ]}},
+            {"listen": "test", "script": {"type": "text/javascript", "exec": [
+              "if (pm.response.code === 200) {",
+              "  const data = pm.response.json();",
+              "  pm.test('Candidates use published generation', () => pm.expect(data.generation_id).to.equal(pm.variables.get('generation_id')));",
+              "  pm.test('Policy ranks first', () => pm.expect(data.results[0].passage).to.include('BLUE-482'));",
+              "  pm.collectionVariables.set('candidate_ids', JSON.stringify(data.results.map(item => item.candidate_id)));",
+              "  pm.collectionVariables.set('page_id', data.results[0].page_id);",
+              "}"
+            ]}}
+          ],
+          "request": {
+            "method": "POST", "url": "{{base_url}}/documents/candidates",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{{search_body}}", "options": {"raw": {"language": "json"}}}
+          }
+        },
+        {
+          "name": "11 - Semantic vector search",
+          "event": [
+            {"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+              "pm.variables.set('search_body', JSON.stringify({corpus_id: pm.variables.get('corpus_id'), query: pm.variables.get('query'), candidate_method: 'dense', limit: 1}));"
+            ]}},
+            {"listen": "test", "script": {"type": "text/javascript", "exec": [
+              "if (pm.response.code === 200) {",
+              "  const data = pm.response.json();",
+              "  pm.test('Dense retrieval generation matches', () => pm.expect(data.generation_id).to.equal(pm.variables.get('generation_id')));",
+              "  pm.test('Network policy ranks first', () => pm.expect(data.results[0].relative_path).to.equal('retries.txt'));",
+              "  pm.test('Expected evidence retrieved', () => pm.expect(data.results[0].passage).to.include('BLUE-482'));",
+              "  pm.test('Vector similarity score returned', () => pm.expect(data.results[0].score_type).to.equal('dense'));",
+              "}"
+            ]}}
+          ],
+          "request": {
+            "method": "POST", "url": "{{base_url}}/documents/search",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{{search_body}}", "options": {"raw": {"language": "json"}}}
+          }
+        },
+        {
+          "name": "12 - Verify live source document",
+          "request": {"method": "GET", "url": "{{base_url}}/documents/{{page_id}}?corpus_id={{corpus_id}}"},
+          "event": [{"listen": "test", "script": {"type": "text/javascript", "exec": [
+            "if (pm.response.code === 200) { pm.test('Live source matches evidence', () => pm.expect(pm.response.json().text).to.include('BLUE-482')); }"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "Optional - cross-encoder reranking",
+      "description": "Send only after the End-to-end folder succeeds. Requires the provisioned local reranker. The generation and candidates must not have been replaced.",
+      "item": [
+        {
+          "name": "Rerank stored candidates",
+          "event": [{"listen": "prerequest", "script": {"type": "text/javascript", "exec": [
+            "pm.variables.set('rerank_body', JSON.stringify({corpus_id: pm.variables.get('corpus_id'), query: pm.variables.get('query'), generation_id: pm.variables.get('generation_id'), candidate_ids: JSON.parse(pm.variables.get('candidate_ids')), rerank_method: 'cross_encoder', limit: 1}));"
+          ]}}],
+          "request": {
+            "method": "POST", "url": "{{base_url}}/documents/rerank",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{{rerank_body}}", "options": {"raw": {"language": "json"}}}
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inspect demo (read-only)",
+      "item": [
+        {"name": "List accessible projects", "request": {"method": "GET", "url": "{{base_url}}/projects"}},
+        {"name": "List project corpora", "request": {"method": "GET", "url": "{{base_url}}/projects/{{project_id}}/corpora"}},
+        {"name": "List corpus jobs", "request": {"method": "GET", "url": "{{base_url}}/ingestions?corpus_id={{corpus_id}}"}},
+        {"name": "Read corpus schedule", "request": {"method": "GET", "url": "{{base_url}}/schedules/daily?corpus_id={{corpus_id}}"}}
+      ]
+    }
+  ]
+}

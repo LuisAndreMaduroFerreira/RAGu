@@ -1,0 +1,4 @@
+# Replace the placeholder with a SHA-256 password hash in a PRIVATE ACL file.
+# This deliberately is not a ready-to-run credential.
+user default off
+user ragu_import on #REPLACE_WITH_SHA256_PASSWORD_HASH ~ragu:import:* -@all +ping +hello +mget +set +scan +unlink +client|setinfo +client|setname

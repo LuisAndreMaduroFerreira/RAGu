@@ -1,0 +1,50 @@
+[project]
+name = "ragu"
+version = "0.1.0"
+description = "Private, authenticated retrieval for a scoped Confluence project."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi[standard]",
+    "sqlalchemy>=2.0",
+    "alembic",
+    "psycopg[binary]",
+    "pwdlib[argon2]",
+    "pyjwt[crypto]",
+    "pydantic-settings",
+    "python-dotenv",
+    "qdrant-client[fastembed]",
+    "beautifulsoup4",
+    "langchain-text-splitters",
+    "httpx",
+    "mcp>=2,<3",
+    "prometheus-client>=0.26.0",
+    "redis>=8.1.0",
+]
+
+[project.scripts]
+ragu = "ragu.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ragu"]
+
+[dependency-groups]
+dev = [
+    "fakeredis>=2.40.0",
+    "pytest",
+    "ruff",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["postgres: real migrations and concurrent transactions in a disposable PostgreSQL cluster"]
+
+[tool.uv]
+link-mode = "copy"

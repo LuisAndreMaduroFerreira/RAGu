@@ -1,0 +1,11 @@
+storage:
+  storage_path: /absolute/private/path/qdrant-storage
+
+service:
+  host: 127.0.0.1
+  http_port: 6333
+  grpc_port: 6334
+
+telemetry_disabled: true
+
+# Supply QDRANT__SERVICE__API_KEY through the service's private secret configuration.
